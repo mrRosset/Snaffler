@@ -28,6 +28,45 @@ namespace Snaffler
         private string shareResultTemplate { get; set; }
         private string dirResultTemplate { get; set; }
 
+        private static readonly char[] CsvSpecialChars = { ',', '"', '\r', '\n' };
+
+        // TSV and CSV output: one field per column, separated by Options.Separator.
+        private bool IsDelimitedOutput
+        {
+            get { return Options.LogType == LogType.TSV || Options.LogType == LogType.CSV; }
+        }
+
+        // Escapes a single field for the current output format (RFC 4180 quoting for CSV, untouched otherwise).
+        private string Field(string value)
+        {
+            if (value == null)
+            {
+                return "";
+            }
+            if (Options.LogType != LogType.CSV || value.IndexOfAny(CsvSpecialChars) < 0)
+            {
+                return value;
+            }
+            return "\"" + value.Replace("\"", "\"\"") + "\"";
+        }
+
+        private string JoinFields(params string[] fields)
+        {
+            string[] escaped = new string[fields.Length];
+            for (int i = 0; i < fields.Length; i++)
+            {
+                escaped[i] = Field(fields[i]);
+            }
+            return string.Join(Options.Separator.ToString(), escaped);
+        }
+
+        // Builds "<host><sep><utc time><sep><tag><sep><body>". body must already be escaped (via Field/JoinFields).
+        private string LogLine(SnafflerMessage message, string tag, string body)
+        {
+            string time = message.DateTime.ToUniversalTime().ToString("u");
+            return JoinFields(hostString(), time, tag) + Options.Separator + body;
+        }
+
         private string hostString()
         {
             if (string.IsNullOrWhiteSpace(_hostString))
@@ -61,21 +100,11 @@ namespace Snaffler
                     return;
                 }
 
-                // set up the  TSV output if the flag is set
-                if (Options.LogTSV)
-                {
-                    fileResultTemplate = "{0}" + Options.Separator + "{1}" + Options.Separator + "{2}" + Options.Separator + "{3}" + Options.Separator + "{4}" + Options.Separator + "{5}" + Options.Separator + "{6}" + Options.Separator + "{7:u}" + Options.Separator + "{8}" + Options.Separator + "{9}" + Options.Separator + "{10}";
-                    shareResultTemplate = "{0}" + Options.Separator + "{1}" + Options.Separator + "{2}";
-                    dirResultTemplate = "{0}" + Options.Separator + "{1}";
-                }
-                // otherwise just do the normal thing
-                else
-                {
-                    // treat all as strings except LastWriteTime {6}
-                    fileResultTemplate = "{{{0}}}<{1}|{2}{3}{4}|{5}|{6}|{7:u}>({8}{9}) {10}";
-                    shareResultTemplate = "{{{0}}}<{1}>({2}) {3}";
-                    dirResultTemplate = "{{{0}}}({1})";
-                }
+                // templates for the human-readable formats; TSV/CSV are built field-by-field via JoinFields
+                // treat all as strings except LastWriteTime {7}
+                fileResultTemplate = "{{{0}}}<{1}|{2}{3}{4}|{5}|{6}|{7:u}>({8}{9}) {10}";
+                shareResultTemplate = "{{{0}}}<{1}>({2}) {3}";
+                dirResultTemplate = "{{{0}}}({1})";
                 //------------------------------------------
                 // set up new fangled logging
                 //------------------------------------------
@@ -163,11 +192,11 @@ namespace Snaffler
                     {
                         nlogConfig.AddRule(LogLevel, LogLevel.Fatal, logfile);
                     }
-                    if (Options.LogType == LogType.Plain)
+                    if (Options.LogType != LogType.JSON)
                     {
                         logfile.Layout = "${message}";
                     }
-                    else if (Options.LogType == LogType.JSON)
+                    else
                     {
                         var eventProperties = new JsonLayout();
                         eventProperties.IncludeAllProperties = true;
@@ -247,13 +276,13 @@ namespace Snaffler
             BlockingMq Mq = BlockingMq.GetMq();
             foreach (SnafflerMessage message in Mq.Q.GetConsumingEnumerable())
             {
-                if (Options.LogType == LogType.Plain)
-                {
-                    ProcessMessage(message);
-                }
-                else if (Options.LogType == LogType.JSON)
+                if (Options.LogType == LogType.JSON)
                 {
                     ProcessMessageJSON(message);
+                }
+                else
+                {
+                    ProcessMessage(message);
                 }
 
                 // catch terminating messages and bail out of the master 'while' loop
@@ -267,34 +296,32 @@ namespace Snaffler
 
         private void ProcessMessage(SnafflerMessage message)
         {
-            //  standardized time formatting,  UTC
-            string datetime = String.Format("{1}{0}{2:u}{0}", Options.Separator, hostString(), message.DateTime.ToUniversalTime());
-
+            //  standardized time formatting,  UTC (handled in LogLine)
             switch (message.Type)
             {
                 case SnafflerMessageType.Trace:
-                    Logger.Trace(datetime + "[Trace]" + Options.Separator + message.Message);
+                    Logger.Trace(LogLine(message, "[Trace]", Field(message.Message)));
                     break;
                 case SnafflerMessageType.Degub:
-                    Logger.Debug(datetime + "[Degub]" + Options.Separator + message.Message);
+                    Logger.Debug(LogLine(message, "[Degub]", Field(message.Message)));
                     break;
                 case SnafflerMessageType.Info:
-                    Logger.Info(datetime + "[Info]" + Options.Separator + message.Message);
+                    Logger.Info(LogLine(message, "[Info]", Field(message.Message)));
                     break;
                 case SnafflerMessageType.FileResult:
-                    Logger.Warn(datetime + "[File]" + Options.Separator + FileResultLogFromMessage(message));
+                    Logger.Warn(LogLine(message, "[File]", FileResultLogFromMessage(message)));
                     break;
                 case SnafflerMessageType.DirResult:
-                    Logger.Warn(datetime + "[Dir]" + Options.Separator + DirResultLogFromMessage(message));
+                    Logger.Warn(LogLine(message, "[Dir]", DirResultLogFromMessage(message)));
                     break;
                 case SnafflerMessageType.ShareResult:
-                    Logger.Warn(datetime + "[Share]" + Options.Separator + ShareResultLogFromMessage(message));
+                    Logger.Warn(LogLine(message, "[Share]", ShareResultLogFromMessage(message)));
                     break;
                 case SnafflerMessageType.Error:
-                    Logger.Error(datetime + "[Error]" + Options.Separator + message.Message);
+                    Logger.Error(LogLine(message, "[Error]", Field(message.Message)));
                     break;
                 case SnafflerMessageType.Fatal:
-                    Logger.Fatal(datetime + "[Fatal]" + Options.Separator + message.Message);
+                    Logger.Fatal(LogLine(message, "[Fatal]", Field(message.Message)));
                     if (Debugger.IsAttached)
                     {
                         Console.ReadKey();
@@ -314,42 +341,32 @@ namespace Snaffler
 
         private void ProcessMessageJSON(SnafflerMessage message)
         {
-            //  standardized time formatting,  UTC
-            string datetime = String.Format("{1}{0}{2:u}{0}", Options.Separator, hostString(), message.DateTime.ToUniversalTime());
-
+            //  standardized time formatting,  UTC (handled in LogLine)
             switch (message.Type)
             {
                 case SnafflerMessageType.Trace:
-                    //Logger.Trace(message);
-                    Logger.Trace(datetime + "[Trace]" + Options.Separator + message.Message, message);
+                    Logger.Trace(LogLine(message, "[Trace]", message.Message), message);
                     break;
                 case SnafflerMessageType.Degub:
-                    //Logger.Debug(message);
-                    Logger.Debug(datetime + "[Degub]" + Options.Separator + message.Message, message);
+                    Logger.Debug(LogLine(message, "[Degub]", message.Message), message);
                     break;
                 case SnafflerMessageType.Info:
-                    //Logger.Info(message);
-                    Logger.Info(datetime + "[Info]" + Options.Separator + message.Message, message);
+                    Logger.Info(LogLine(message, "[Info]", message.Message), message);
                     break;
                 case SnafflerMessageType.FileResult:
-                    //Logger.Warn(message);
-                    Logger.Warn(datetime + "[File]" + Options.Separator + FileResultLogFromMessage(message), message);
+                    Logger.Warn(LogLine(message, "[File]", FileResultLogFromMessage(message)), message);
                     break;
                 case SnafflerMessageType.DirResult:
-                    //Logger.Warn(message);
-                    Logger.Warn(datetime + "[Dir]" + Options.Separator + DirResultLogFromMessage(message), message);
+                    Logger.Warn(LogLine(message, "[Dir]", DirResultLogFromMessage(message)), message);
                     break;
                 case SnafflerMessageType.ShareResult:
-                    //Logger.Warn(message);
-                    Logger.Warn(datetime + "[Share]" + Options.Separator + ShareResultLogFromMessage(message), message);
+                    Logger.Warn(LogLine(message, "[Share]", ShareResultLogFromMessage(message)), message);
                     break;
                 case SnafflerMessageType.Error:
-                    //Logger.Error(message);
-                    Logger.Error(datetime + "[Error]" + Options.Separator + message.Message, message);
+                    Logger.Error(LogLine(message, "[Error]", message.Message), message);
                     break;
                 case SnafflerMessageType.Fatal:
-                    //Logger.Fatal(message);
-                    Logger.Fatal(datetime + "[Fatal]" + Options.Separator + message.Message, message);
+                    Logger.Fatal(LogLine(message, "[Fatal]", message.Message), message);
                     if (Debugger.IsAttached)
                     {
                         Console.ReadKey();
@@ -392,6 +409,10 @@ namespace Snaffler
                 rwString = rwString + "M";
             }
 
+            if (IsDelimitedOutput)
+            {
+                return JoinFields(triage, sharePath, rwString, shareComment);
+            }
             return string.Format(shareResultTemplate, triage, sharePath, rwString, shareComment);
         }
 
@@ -399,6 +420,10 @@ namespace Snaffler
         {
             string sharePath = message.DirResult.DirPath;
             string triage = message.DirResult.Triage.ToString();
+            if (IsDelimitedOutput)
+            {
+                return JoinFields(triage, sharePath);
+            }
             return string.Format(dirResultTemplate, triage, sharePath);
         }
 
@@ -434,8 +459,8 @@ namespace Snaffler
 
                 string fileSizeString;
 
-                // TSV output will probably be machine-consumed.  Don't pretty it up.
-                if (Options.LogTSV)
+                // TSV/CSV output will probably be machine-consumed.  Don't pretty it up.
+                if (IsDelimitedOutput)
                 {
                     fileSizeString = fileSize.ToString();
                 }
@@ -471,6 +496,12 @@ namespace Snaffler
                     {
                         altname = "#_as_#" + message.FileResult.AlternativeFileInfo.AlternativeFullFileName;
                     }
+                }
+
+                if (IsDelimitedOutput)
+                {
+                    return JoinFields(triageString, matchedclassifier, canread, canwrite, canmodify, matchedstring, fileSizeString,
+                        modifiedStamp.ToString("u"), filepath, altname, matchcontext);
                 }
 
                 return string.Format(fileResultTemplate, triageString, matchedclassifier, canread, canwrite, canmodify, matchedstring, fileSizeString, modifiedStamp,

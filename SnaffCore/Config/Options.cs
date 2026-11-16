@@ -7,7 +7,9 @@ namespace SnaffCore.Config
     public enum LogType
     {
         Plain = 0,
-        JSON = 1
+        JSON = 1,
+        TSV = 2,
+        CSV = 3
     }
 
     public partial class Options
@@ -47,6 +49,7 @@ namespace SnaffCore.Config
         public bool LogToFile { get; set; } = false;
         public string LogFilePath { get; set; }
         public LogType LogType { get; set; }
+        // Legacy: superseded by LogType = "TSV". Still honoured so older config files keep working.
         public bool LogTSV { get; set; } = false;
         public char Separator { get; set; } = ' ';
         public bool LogToConsole { get; set; } = true;

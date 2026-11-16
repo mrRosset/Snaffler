@@ -54,7 +54,7 @@ The key incantations are:
 
 `-n`   Disables computer discovery, takes a comma-separated list of hosts or input file to do share and file discovery on. Note if supplying a file, the input needs to be a path so C:\targets.txt or .\targets.txt as an example.
 
-`-y`   TSV-formats the output.
+`-t`   Output format: `plain` (default), `json`, `tsv` or `csv`. `json` only affects file output (`-o`); `tsv` and `csv` apply to both console and file output. e.g. `-t csv` (replaces the old `-y` switch, use `-t tsv` instead)
 
 `-b`   Skips the LAIM rules that will find less-interesting stuff, tune it with a number between 0 and 3.
 

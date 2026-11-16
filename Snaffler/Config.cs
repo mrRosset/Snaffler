@@ -96,17 +96,16 @@ namespace Snaffler
                 "How many bytes of context either side of found strings in files to show, e.g. -j 200");
             SwitchArgument domainUserArg = new SwitchArgument('u', "domainusers", "Makes Snaffler grab a list of interesting-looking accounts from the domain and uses them in searches.", false);
             ValueArgument<int> maxThreadsArg = new ValueArgument<int>('x', "maxthreads", "How many threads to be snaffling with. Any less than 4 and you're gonna have a bad time.");
-            SwitchArgument tsvArg = new SwitchArgument('y', "tsv", "Makes Snaffler output as tsv.", false);
             SwitchArgument dfsArg = new SwitchArgument('f', "dfs", "Limits Snaffler to finding file shares via DFS, for \"OPSEC\" reasons.", false);
             SwitchArgument findSharesOnlyArg = new SwitchArgument('a', "sharesonly",
                 "Stops after finding shares, doesn't walk their filesystems.", false);
             ValueArgument<string> compExclusionArg = new ValueArgument<string>('k', "exclusions", "Path to a file containing a list of computers to exclude from scanning.");
             ValueArgument<string> compTargetArg = new ValueArgument<string>('n', "comptarget", "List of computers in a file(e.g C:\targets.txt), a single Computer (or comma separated list) to target.");
             ValueArgument<string> ruleDirArg = new ValueArgument<string>('p', "rulespath", "Path to a directory full of toml-formatted rules. Snaffler will load all of these in place of the default ruleset.");
-            ValueArgument<string> logType = new ValueArgument<string>('t', "logtype", "Type of log you would like to output. Currently supported options are plain and JSON. Defaults to plain.");
+            ValueArgument<string> logType = new ValueArgument<string>('t', "logtype", "Type of log you would like to output. Supported options are plain, JSON, TSV and CSV. Defaults to plain. JSON only affects file output; TSV and CSV affect both console and file output.");
             ValueArgument<string> timeOutArg = new ValueArgument<string>('e', "timeout",
                 "Interval between status updates (in minutes) also acts as a timeout for AD data to be gathered via LDAP. Turn this knob up if you aren't getting any computers from AD when you run Snaffler through a proxy or other slow link. Default = 5");
-            // list of letters i haven't used yet: gnqw
+            // list of letters i haven't used yet: gqwy
 
             CommandLineParser.CommandLineParser parser = new CommandLineParser.CommandLineParser();
             parser.Arguments.Add(timeOutArg);
@@ -124,7 +123,6 @@ namespace Snaffler
             parser.Arguments.Add(maxGrepSizeArg);
             parser.Arguments.Add(grepContextArg);
             parser.Arguments.Add(domainUserArg);
-            parser.Arguments.Add(tsvArg);
             parser.Arguments.Add(dfsArg);
             parser.Arguments.Add(findSharesOnlyArg);
             parser.Arguments.Add(maxThreadsArg);
@@ -166,16 +164,24 @@ namespace Snaffler
 
                 if (logType.Parsed && !String.IsNullOrWhiteSpace(logType.Value))
                 {
-                    //Set the default to plain
-                    parsedConfig.LogType = LogType.Plain;
-                    //if they set a different type then replace it with the new type.
-                    if (logType.Value.ToLower() == "json")
+                    switch (logType.Value.Trim().ToLower())
                     {
-                        parsedConfig.LogType = LogType.JSON;
-                    }
-                    else
-                    {
-                        Mq.Info("Invalid type argument passed (" + logType.Value + ") defaulting to plaintext");
+                        case "plain":
+                            parsedConfig.LogType = LogType.Plain;
+                            break;
+                        case "json":
+                            parsedConfig.LogType = LogType.JSON;
+                            break;
+                        case "tsv":
+                            parsedConfig.LogType = LogType.TSV;
+                            break;
+                        case "csv":
+                            parsedConfig.LogType = LogType.CSV;
+                            break;
+                        default:
+                            parsedConfig.LogType = LogType.Plain;
+                            Mq.Info("Invalid type argument passed (" + logType.Value + ") defaulting to plaintext");
+                            break;
                     }
                 }
 
@@ -266,15 +272,6 @@ namespace Snaffler
                 parsedConfig.ShareThreads = parsedConfig.MaxThreads / 3;
                 parsedConfig.FileThreads = parsedConfig.MaxThreads / 3;
                 parsedConfig.TreeThreads = parsedConfig.MaxThreads / 3;
-
-                if (tsvArg.Parsed)
-                {
-                    parsedConfig.LogTSV = true;
-                    if (parsedConfig.Separator == ' ')
-                    {
-                        parsedConfig.Separator = '\t';
-                    }
-                }
 
                 // Set loglevel.
                 if (verboseArg.Parsed)
@@ -401,6 +398,21 @@ namespace Snaffler
                         parsedConfig = Toml.ReadFile<Options>(configFile, settings);
                         Mq.Info("Read config file from " + configFile);
                     }
+                }
+
+                // normalise output format settings (applies to both CLI args and config files)
+                if (parsedConfig.LogTSV && parsedConfig.LogType == LogType.Plain)
+                {
+                    // legacy LogTSV = true from older config files
+                    parsedConfig.LogType = LogType.TSV;
+                }
+                if (parsedConfig.LogType == LogType.TSV && parsedConfig.Separator == ' ')
+                {
+                    parsedConfig.Separator = '\t';
+                }
+                else if (parsedConfig.LogType == LogType.CSV)
+                {
+                    parsedConfig.Separator = ',';
                 }
 
                 if (!parsedConfig.LogToConsole && !parsedConfig.LogToFile)

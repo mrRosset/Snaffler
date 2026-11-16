@@ -31,9 +31,9 @@ LogLevelString = "info" # how verbose to be. options include:
 # "info" (which is the default) which will tell you some basic stuff about what snaffler is doing.
 # "degub" (or "debug" if you prefer) which will show some debugging info too.
 # "trace" which will be insanely noisy and throw errors all over the joint.
-LogType = "Plain" # accepts either "plain" or "json", with self-explanatory results. Only affects file output, console output will remain plain.
-LogTSV = false # enables use of TSV for console/plain output.
-Separator = 32 # change this to a different byte to get a different character as your field separator instead of TAB.
+LogType = "Plain" # accepts "Plain", "JSON", "TSV" or "CSV". JSON only affects file output (console stays plain); TSV and CSV apply to both console and file output.
+LogTSV = false # legacy, equivalent to LogType = "TSV". Kept so older config files still work.
+Separator = 32 # field separator for TSV output; leave at 32 (space) to get the default TAB. Ignored for CSV, which always uses a comma.
 LogDeniedShares = false # if set to true, output will include shares that exist but you can't look inside.
 Snaffle = false # if set to true, this will actually retrieve (or SNAFFLE if you will...) a copy of files that are deemed worthy by a filescanner task.
 MaxSizeToSnaffle = 10000000 # obviously we don't want to download a 200GB full disk backup of a DC to your 40GB testing VM, so this is an upper limit on file size to 'snaffle' in bytes.
